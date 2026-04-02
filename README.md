@@ -13,13 +13,13 @@ Persistent cross-session memory for Claude Code, powered by [PowerMem](https://g
 ### 1. Add the marketplace
 
 ```
-/plugin marketplace add YOUR_GITHUB_REPO
+/plugin marketplace add linyuanbin/oneMem
 ```
 
 ### 2. Install the plugin
 
 ```bash
-claude plugin install onemem@onemem
+claude plugin install onemem@agent
 ```
 
 ### 3. Configure PowerMem access
