@@ -195,16 +195,15 @@ def cmd_load(stdin_data):
     if not content:
         return json.dumps({})
 
-    # Show a brief notice in the terminal (stderr is displayed to the user by Claude Code)
     saved_at = results[0].get("metadata", {}).get("saved_at", "")
     date_str = saved_at[:10] if saved_at else "unknown date"
-    print(f"🧠 oneMem: memory loaded from {date_str}", file=sys.stderr)
 
     output = {
+        "systemMessage": f"🧠 oneMem: memory loaded from {date_str}",
         "hookSpecificOutput": {
             "hook_event_name": "SessionStart",
             "additionalContext": f"## Previous Session Memory\n\n{content}",
-        }
+        },
     }
     return json.dumps(output)
 
