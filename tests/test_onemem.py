@@ -113,5 +113,87 @@ class TestGetProjectId(unittest.TestCase):
             self.assertEqual(result, Path(tmpdir).name)
 
 
+class TestExtractContextFromTranscript(unittest.TestCase):
+
+    def _write_transcript(self, lines, path):
+        with open(path, "w") as f:
+            for line in lines:
+                f.write(json.dumps(line) + "\n")
+
+    def test_extracts_last_assistant_messages(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            path = f.name
+        try:
+            lines = [
+                {"role": "user", "content": [{"type": "text", "text": "hello"}]},
+                {"role": "assistant", "content": [{"type": "text", "text": "response one"}]},
+                {"role": "user", "content": [{"type": "text", "text": "follow up"}]},
+                {"role": "assistant", "content": [{"type": "text", "text": "response two"}]},
+            ]
+            self._write_transcript(lines, path)
+            result = onemem.extract_context_from_transcript(path)
+            self.assertIn("response one", result)
+            self.assertIn("response two", result)
+            self.assertNotIn("hello", result)
+            self.assertNotIn("follow up", result)
+        finally:
+            os.unlink(path)
+
+    def test_takes_only_last_10_assistant_messages(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            path = f.name
+        try:
+            lines = []
+            for i in range(15):
+                lines.append({"role": "assistant", "content": [{"type": "text", "text": f"msg {i}"}]})
+            self._write_transcript(lines, path)
+            result = onemem.extract_context_from_transcript(path)
+            # Should contain msgs 5-14 (last 10), not msgs 0-4
+            self.assertIn("msg 14", result)
+            self.assertIn("msg 5", result)
+            self.assertNotIn("msg 0", result)
+            self.assertNotIn("msg 4", result)
+        finally:
+            os.unlink(path)
+
+    def test_truncates_to_8000_chars(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            path = f.name
+        try:
+            big_text = "x" * 1000
+            lines = [{"role": "assistant", "content": [{"type": "text", "text": big_text}]} for _ in range(10)]
+            self._write_transcript(lines, path)
+            result = onemem.extract_context_from_transcript(path)
+            self.assertLessEqual(len(result), 8000)
+        finally:
+            os.unlink(path)
+
+    def test_returns_empty_string_when_file_missing(self):
+        result = onemem.extract_context_from_transcript("/nonexistent/transcript.jsonl")
+        self.assertEqual(result, "")
+
+    def test_returns_empty_string_when_no_assistant_messages(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            path = f.name
+        try:
+            lines = [{"role": "user", "content": [{"type": "text", "text": "only user"}]}]
+            self._write_transcript(lines, path)
+            result = onemem.extract_context_from_transcript(path)
+            self.assertEqual(result, "")
+        finally:
+            os.unlink(path)
+
+    def test_handles_malformed_jsonl_gracefully(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            f.write("not json\n")
+            f.write(json.dumps({"role": "assistant", "content": [{"type": "text", "text": "valid"}]}) + "\n")
+            path = f.name
+        try:
+            result = onemem.extract_context_from_transcript(path)
+            self.assertIn("valid", result)
+        finally:
+            os.unlink(path)
+
+
 if __name__ == "__main__":
     unittest.main()

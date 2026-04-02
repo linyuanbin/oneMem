@@ -64,3 +64,41 @@ def get_project_id(cwd):
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
     return Path(cwd).name
+
+
+def extract_context_from_transcript(transcript_path, max_messages=10, max_chars=8000):
+    """
+    Read a Claude Code transcript.jsonl and extract the last max_messages
+    assistant text blocks. Returns concatenated text capped at max_chars.
+    Returns empty string on any error.
+    """
+    try:
+        with open(transcript_path) as f:
+            raw_lines = f.readlines()
+    except (FileNotFoundError, OSError):
+        return ""
+
+    assistant_texts = []
+    for line in raw_lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("role") != "assistant":
+            continue
+        content = entry.get("content", [])
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text", "").strip()
+                    if text:
+                        assistant_texts.append(text)
+        elif isinstance(content, str) and content.strip():
+            assistant_texts.append(content.strip())
+
+    last_messages = assistant_texts[-max_messages:]
+    combined = "\n---\n".join(last_messages)
+    return combined[:max_chars]
