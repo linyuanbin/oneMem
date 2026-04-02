@@ -91,7 +91,8 @@ oneMem/
   "name": "onemem",
   "version": "0.1.0",
   "description": "Persistent cross-session memory for Claude Code via PowerMem",
-  "hooks": "./hooks/hooks.json"
+  "hooks": "./hooks/hooks.json",
+  "engines": { "claude-code": ">=1.0.0" }
 }
 ```
 
@@ -121,25 +122,24 @@ oneMem/
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/onemem.py load",
-            "timeout": 15,
-            "statusMessage": "Loading memory context..."
+            "timeout": 15
           }
         ]
       }
     ],
     "Stop": [
       {
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/onemem.py save",
-            "timeout": 15,
-            "async": true,
-            "statusMessage": "Saving session memory..."
+            "timeout": 15
           }
         ]
       }
@@ -147,6 +147,8 @@ oneMem/
   }
 }
 ```
+
+> Note: `Stop` is already non-blocking by design — Claude Code does not wait for Stop hooks to complete before ending the session.
 
 ### `scripts/onemem.py` — Internal Structure
 
@@ -204,7 +206,7 @@ Single file, logically organized into these sections:
 ```json
 {
   "hookSpecificOutput": {
-    "hookEventName": "SessionStart",
+    "hook_event_name": "SessionStart",
     "additionalContext": "## Previous Session Memory\n\n<content from PowerMem>"
   }
 }
@@ -240,8 +242,8 @@ If no memory found or config missing: output `{}` (empty JSON object), exit 0.
 
 | Scenario | Behavior |
 |----------|----------|
-| `~/.oneMem/settings.json` missing | `load`: output `additionalContext` with setup instructions; `save`: silent exit 0 |
-| `powermem_url` or `api_key` missing | Same as above |
+| `~/.oneMem/settings.json` missing | `load`: output `{}`, session starts normally; `save`: silent exit 0 |
+| `powermem_url` or `api_key` missing | Same as above — output `{}`, exit 0 |
 | Not a git repo | Fallback to `basename(cwd)` as `user_id` |
 | PowerMem HTTP error / timeout | Catch exception, exit 0 (never block Claude) |
 | `transcript_path` missing or malformed | Catch exception, silent exit 0 |
