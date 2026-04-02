@@ -290,5 +290,91 @@ class TestPowerMemAdd(unittest.TestCase):
         self.assertEqual(captured["data"]["metadata"]["session_id"], "s1")
 
 
+class TestCmdLoad(unittest.TestCase):
+
+    def test_outputs_additional_context_when_memory_found(self):
+        stdin_data = {"cwd": "/tmp/myproject", "session_id": "s1", "transcript_path": "/tmp/t.jsonl"}
+        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem"}
+        fake_results = [{"content": "last session: working on auth module", "memory_id": "m1"}]
+
+        with patch.object(onemem, "load_config", return_value=fake_config), \
+             patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
+             patch.object(onemem, "powermem_search", return_value=fake_results):
+            output = onemem.cmd_load(stdin_data)
+
+        parsed = json.loads(output)
+        self.assertIn("hookSpecificOutput", parsed)
+        self.assertIn("additionalContext", parsed["hookSpecificOutput"])
+        self.assertIn("last session: working on auth module", parsed["hookSpecificOutput"]["additionalContext"])
+
+    def test_outputs_empty_json_when_config_missing(self):
+        stdin_data = {"cwd": "/tmp/myproject", "session_id": "s1", "transcript_path": "/tmp/t.jsonl"}
+
+        with patch.object(onemem, "load_config", return_value=None):
+            output = onemem.cmd_load(stdin_data)
+
+        self.assertEqual(json.loads(output), {})
+
+    def test_outputs_empty_json_when_no_memory_found(self):
+        stdin_data = {"cwd": "/tmp/myproject", "session_id": "s1", "transcript_path": "/tmp/t.jsonl"}
+        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem"}
+
+        with patch.object(onemem, "load_config", return_value=fake_config), \
+             patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
+             patch.object(onemem, "powermem_search", return_value=[]):
+            output = onemem.cmd_load(stdin_data)
+
+        self.assertEqual(json.loads(output), {})
+
+
+class TestCmdSave(unittest.TestCase):
+
+    def test_calls_powermem_add_with_extracted_context(self):
+        stdin_data = {
+            "cwd": "/tmp/myproject",
+            "session_id": "s42",
+            "transcript_path": "/tmp/t.jsonl",
+        }
+        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem"}
+        fake_context = "I implemented the login feature and wrote tests"
+
+        add_calls = []
+
+        def fake_add(base_url, api_key, agent_id, user_id, content, metadata):
+            add_calls.append({"content": content, "metadata": metadata})
+            return True
+
+        with patch.object(onemem, "load_config", return_value=fake_config), \
+             patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
+             patch.object(onemem, "extract_context_from_transcript", return_value=fake_context), \
+             patch.object(onemem, "powermem_add", side_effect=fake_add):
+            onemem.cmd_save(stdin_data)
+
+        self.assertEqual(len(add_calls), 1)
+        self.assertEqual(add_calls[0]["content"], fake_context)
+        self.assertEqual(add_calls[0]["metadata"]["session_id"], "s42")
+
+    def test_does_nothing_when_config_missing(self):
+        stdin_data = {"cwd": "/tmp/myproject", "session_id": "s1", "transcript_path": "/tmp/t.jsonl"}
+
+        with patch.object(onemem, "load_config", return_value=None), \
+             patch.object(onemem, "powermem_add") as mock_add:
+            onemem.cmd_save(stdin_data)
+
+        mock_add.assert_not_called()
+
+    def test_does_nothing_when_transcript_empty(self):
+        stdin_data = {"cwd": "/tmp/myproject", "session_id": "s1", "transcript_path": "/tmp/t.jsonl"}
+        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem"}
+
+        with patch.object(onemem, "load_config", return_value=fake_config), \
+             patch.object(onemem, "get_project_id", return_value="proj"), \
+             patch.object(onemem, "extract_context_from_transcript", return_value=""), \
+             patch.object(onemem, "powermem_add") as mock_add:
+            onemem.cmd_save(stdin_data)
+
+        mock_add.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

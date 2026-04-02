@@ -20,6 +20,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -159,3 +160,86 @@ def powermem_add(base_url, api_key, agent_id, user_id, content, metadata):
         return True
     except Exception:
         return False
+
+
+def cmd_load(stdin_data):
+    """
+    SessionStart hook handler.
+    Returns a JSON string: either hookSpecificOutput with additionalContext,
+    or {} if no config / no memory found.
+    """
+    cfg = load_config()
+    if not cfg:
+        return json.dumps({})
+
+    cwd = stdin_data.get("cwd", os.getcwd())
+    user_id = get_project_id(cwd)
+
+    results = powermem_search(cfg["powermem_url"], cfg["api_key"], cfg["agent_id"], user_id)
+    if not results:
+        return json.dumps({})
+
+    content = results[0].get("content", "")
+    if not content:
+        return json.dumps({})
+
+    output = {
+        "hookSpecificOutput": {
+            "hook_event_name": "SessionStart",
+            "additionalContext": f"## Previous Session Memory\n\n{content}",
+        }
+    }
+    return json.dumps(output)
+
+
+def cmd_save(stdin_data):
+    """
+    Stop hook handler.
+    Extracts the last 10 assistant messages from the transcript and
+    persists them to PowerMem. Silent on all errors.
+    """
+    cfg = load_config()
+    if not cfg:
+        return
+
+    cwd = stdin_data.get("cwd", os.getcwd())
+    user_id = get_project_id(cwd)
+    session_id = stdin_data.get("session_id", "")
+    transcript_path = stdin_data.get("transcript_path", "")
+
+    context = extract_context_from_transcript(transcript_path)
+    if not context:
+        return
+
+    metadata = {
+        "session_id": session_id,
+        "cwd": cwd,
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+    }
+    powermem_add(cfg["powermem_url"], cfg["api_key"], cfg["agent_id"], user_id, context, metadata)
+
+
+def main():
+    """Entry point. Reads stdin JSON, dispatches to cmd_load or cmd_save."""
+    if len(sys.argv) < 2 or sys.argv[1] not in ("load", "save"):
+        sys.exit(1)
+
+    try:
+        stdin_data = json.loads(sys.stdin.read())
+    except (json.JSONDecodeError, IOError):
+        stdin_data = {}
+
+    try:
+        if sys.argv[1] == "load":
+            output = cmd_load(stdin_data)
+            print(output)
+        else:
+            cmd_save(stdin_data)
+    except Exception:
+        # Never crash — hooks must always exit 0
+        if sys.argv[1] == "load":
+            print("{}")
+
+
+if __name__ == "__main__":
+    main()
