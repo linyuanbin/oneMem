@@ -1,0 +1,7 @@
+{
+  "name": "onemem",
+  "version": "0.1.0",
+  "description": "Persistent cross-session memory for Claude Code via PowerMem",
+  "hooks": "./hooks/hooks.json",
+  "engines": { "claude-code": ">=1.0.0" }
+}
