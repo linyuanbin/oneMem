@@ -19,7 +19,7 @@ Persistent cross-session memory for Claude Code, powered by [PowerMem](https://g
 ### 2. Install the plugin
 
 ```bash
-claude plugin install onemem@agent
+claude plugin install onemem@lin
 ```
 
 ### 3. Configure PowerMem access
