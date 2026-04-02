@@ -63,6 +63,29 @@ class TestLoadConfig(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_env_var_overrides_default_path(self):
+        cfg = {"powermem_url": "http://env-override.example.com", "api_key": "envkey"}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(cfg, f)
+            path = f.name
+        try:
+            with patch.dict(os.environ, {"ONEMEM_CONFIG": path}):
+                result = onemem.load_config()  # no path argument — uses env var
+            self.assertEqual(result["powermem_url"], "http://env-override.example.com")
+            self.assertEqual(result["api_key"], "envkey")
+        finally:
+            os.unlink(path)
+
+    def test_returns_none_when_json_invalid(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write("{ not valid json }")
+            path = f.name
+        try:
+            result = onemem.load_config(path)
+            self.assertIsNone(result)
+        finally:
+            os.unlink(path)
+
 
 if __name__ == "__main__":
     unittest.main()

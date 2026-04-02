@@ -16,11 +16,7 @@ Config: ~/.oneMem/settings.json  (override with ONEMEM_CONFIG env var)
 
 import json
 import os
-import subprocess
 import sys
-import urllib.request
-import urllib.error
-from datetime import datetime, timezone
 from pathlib import Path
 
 
