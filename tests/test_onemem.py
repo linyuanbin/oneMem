@@ -54,14 +54,15 @@ class TestLoadConfig(unittest.TestCase):
         finally:
             os.unlink(path)
 
-    def test_returns_none_when_api_key_missing(self):
+    def test_api_key_defaults_to_empty_string_when_missing(self):
         cfg = {"powermem_url": "http://localhost:8080"}
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(cfg, f)
             path = f.name
         try:
             result = onemem.load_config(path)
-            self.assertIsNone(result)
+            self.assertIsNotNone(result)
+            self.assertEqual(result["api_key"], "")
         finally:
             os.unlink(path)
 
@@ -192,6 +193,34 @@ class TestExtractContextFromTranscript(unittest.TestCase):
         try:
             result = onemem.extract_context_from_transcript(path)
             self.assertIn("valid", result)
+        finally:
+            os.unlink(path)
+
+    def test_extracts_from_cc_transcript_format(self):
+        """Current Claude Code transcript format: type=assistant, content in message.content."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            path = f.name
+        try:
+            lines = [
+                # CC format user entry (should be skipped)
+                {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "question"}]}},
+                # CC format assistant entry (should be extracted)
+                {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "cc format answer"}]}},
+                # CC format assistant with empty text (should be skipped)
+                {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": ""}]}},
+                # CC format assistant with non-text block (should be skipped)
+                {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Bash"}]}},
+                # CC format assistant with valid text alongside tool_use
+                {"type": "assistant", "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "mixed content answer"},
+                    {"type": "tool_use", "name": "Read"},
+                ]}},
+            ]
+            self._write_transcript(lines, path)
+            result = onemem.extract_context_from_transcript(path)
+            self.assertIn("cc format answer", result)
+            self.assertIn("mixed content answer", result)
+            self.assertNotIn("question", result)
         finally:
             os.unlink(path)
 

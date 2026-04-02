@@ -9,7 +9,7 @@ Subcommands:
 Config: ~/.oneMem/settings.json  (override with ONEMEM_CONFIG env var)
   {
     "powermem_url": "https://...",  # required
-    "api_key": "...",               # required
+    "api_key": "...",               # optional (leave empty if no auth required)
     "agent_id": "onemem"            # optional, default "onemem"
   }
 """
@@ -32,7 +32,7 @@ def load_config(path=None):
     Read ~/.oneMem/settings.json (or a custom path for testing).
     The ONEMEM_CONFIG environment variable overrides the default path.
     Returns a dict with keys: powermem_url, api_key, agent_id.
-    Returns None if file is missing or required fields are absent.
+    Returns None if file is missing or powermem_url is absent.
     """
     config_file = Path(path) if path else Path(os.environ.get("ONEMEM_CONFIG", "") or CONFIG_PATH)
     try:
@@ -41,8 +41,10 @@ def load_config(path=None):
     except (FileNotFoundError, json.JSONDecodeError):
         return None
 
-    if not cfg.get("powermem_url") or not cfg.get("api_key"):
+    if not cfg.get("powermem_url"):
         return None
+    # api_key is optional — PowerMem may run without authentication
+    cfg.setdefault("api_key", "")
 
     cfg.setdefault("agent_id", "onemem")
     return cfg
@@ -74,6 +76,10 @@ def extract_context_from_transcript(transcript_path, max_messages=10, max_chars=
     Read a Claude Code transcript.jsonl and extract the last max_messages
     assistant text blocks. Returns concatenated text capped at max_chars.
     Returns empty string on any error.
+
+    Handles two formats:
+    - Current CC format: entry.type == "assistant", content in entry.message.content
+    - Legacy format: entry.role == "assistant", content in entry.content
     """
     try:
         with open(transcript_path) as f:
@@ -90,9 +96,15 @@ def extract_context_from_transcript(transcript_path, max_messages=10, max_chars=
             entry = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if entry.get("role") != "assistant":
+        # Claude Code transcript format: entry.type == "assistant" with
+        # content nested in entry.message.content.
+        # Also handle legacy format where role is at the top level.
+        if entry.get("type") == "assistant":
+            content = entry.get("message", {}).get("content", [])
+        elif entry.get("role") == "assistant":
+            content = entry.get("content", [])
+        else:
             continue
-        content = entry.get("content", [])
         if isinstance(content, list):
             for block in content:
                 if isinstance(block, dict) and block.get("type") == "text":
