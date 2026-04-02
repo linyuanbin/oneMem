@@ -16,6 +16,7 @@ Config: ~/.oneMem/settings.json  (override with ONEMEM_CONFIG env var)
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -42,3 +43,24 @@ def load_config(path=None):
 
     cfg.setdefault("agent_id", "onemem")
     return cfg
+
+
+def get_project_id(cwd):
+    """
+    Return the git remote origin URL as the project identity.
+    Falls back to basename(cwd) if not a git repo or no remote configured.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        url = result.stdout.strip()
+        if result.returncode == 0 and url:
+            return url
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return Path(cwd).name

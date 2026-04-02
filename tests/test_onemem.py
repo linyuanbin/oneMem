@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -85,6 +86,31 @@ class TestLoadConfig(unittest.TestCase):
             self.assertIsNone(result)
         finally:
             os.unlink(path)
+
+
+class TestGetProjectId(unittest.TestCase):
+
+    def test_returns_git_remote_url(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subprocess.run(["git", "init"], cwd=tmpdir, capture_output=True)
+            subprocess.run(
+                ["git", "remote", "add", "origin", "https://github.com/user/myrepo.git"],
+                cwd=tmpdir, capture_output=True
+            )
+            result = onemem.get_project_id(tmpdir)
+            self.assertEqual(result, "https://github.com/user/myrepo.git")
+
+    def test_falls_back_to_dirname_when_no_git_remote(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subprocess.run(["git", "init"], cwd=tmpdir, capture_output=True)
+            # No remote added
+            result = onemem.get_project_id(tmpdir)
+            self.assertEqual(result, Path(tmpdir).name)
+
+    def test_falls_back_to_dirname_when_not_git_repo(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = onemem.get_project_id(tmpdir)
+            self.assertEqual(result, Path(tmpdir).name)
 
 
 if __name__ == "__main__":
