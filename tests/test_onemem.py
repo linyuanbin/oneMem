@@ -5,7 +5,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
+import urllib.error
 
 # Add scripts/ to path so we can import onemem
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
@@ -193,6 +194,100 @@ class TestExtractContextFromTranscript(unittest.TestCase):
             self.assertIn("valid", result)
         finally:
             os.unlink(path)
+
+
+class TestPowerMemSearch(unittest.TestCase):
+
+    def _make_response(self, body_dict, status=200):
+        body = json.dumps(body_dict).encode()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = body
+        mock_resp.status = status
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+
+    def test_returns_first_result_content(self):
+        response_body = {
+            "data": {
+                "results": [
+                    {"memory_id": "m1", "content": "previous work context", "metadata": {}, "created_at": "2026-01-01T00:00:00Z"}
+                ]
+            }
+        }
+        with patch("urllib.request.urlopen", return_value=self._make_response(response_body)):
+            results = onemem.powermem_search("http://localhost:8080", "key", "onemem", "user/repo")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["content"], "previous work context")
+
+    def test_returns_empty_list_when_no_results(self):
+        response_body = {"data": {"results": []}}
+        with patch("urllib.request.urlopen", return_value=self._make_response(response_body)):
+            results = onemem.powermem_search("http://localhost:8080", "key", "onemem", "user/repo")
+        self.assertEqual(results, [])
+
+    def test_returns_empty_list_on_http_error(self):
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("connection refused")):
+            results = onemem.powermem_search("http://localhost:8080", "key", "onemem", "user/repo")
+        self.assertEqual(results, [])
+
+    def test_sends_correct_request_body(self):
+        response_body = {"data": {"results": []}}
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["data"] = json.loads(req.data.decode())
+            captured["headers"] = dict(req.headers)
+            return self._make_response(response_body)
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            onemem.powermem_search("http://localhost:8080", "mykey", "myagent", "git@github.com:user/repo")
+
+        self.assertEqual(captured["data"]["agent_id"], "myagent")
+        self.assertEqual(captured["data"]["user_id"], "git@github.com:user/repo")
+        self.assertEqual(captured["data"]["limit"], 1)
+        self.assertIn("X-api-key", captured["headers"])
+        self.assertEqual(captured["headers"]["X-api-key"], "mykey")
+
+
+class TestPowerMemAdd(unittest.TestCase):
+
+    def _make_response(self, status=200):
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b"{}"
+        mock_resp.status = status
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+
+    def test_returns_true_on_success(self):
+        with patch("urllib.request.urlopen", return_value=self._make_response(200)):
+            result = onemem.powermem_add("http://localhost:8080", "key", "onemem", "user/repo", "content", {})
+        self.assertTrue(result)
+
+    def test_returns_false_on_http_error(self):
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("timeout")):
+            result = onemem.powermem_add("http://localhost:8080", "key", "onemem", "user/repo", "content", {})
+        self.assertFalse(result)
+
+    def test_sends_correct_request_body(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["data"] = json.loads(req.data.decode())
+            return self._make_response()
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            onemem.powermem_add(
+                "http://localhost:8080", "key", "onemem", "user/repo",
+                "my context", {"session_id": "s1"}
+            )
+
+        self.assertEqual(captured["data"]["content"], "my context")
+        self.assertEqual(captured["data"]["agent_id"], "onemem")
+        self.assertEqual(captured["data"]["user_id"], "user/repo")
+        self.assertFalse(captured["data"]["infer"])
+        self.assertEqual(captured["data"]["metadata"]["session_id"], "s1")
 
 
 if __name__ == "__main__":

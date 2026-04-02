@@ -18,6 +18,8 @@ import json
 import os
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 
@@ -102,3 +104,58 @@ def extract_context_from_transcript(transcript_path, max_messages=10, max_chars=
     last_messages = assistant_texts[-max_messages:]
     combined = "\n---\n".join(last_messages)
     return combined[:max_chars]
+
+
+def powermem_search(base_url, api_key, agent_id, user_id, limit=1):
+    """
+    POST /api/v1/memories/search.
+    Returns list of result dicts from data.results, or [] on any error.
+    """
+    url = base_url.rstrip("/") + "/api/v1/memories/search"
+    payload = {
+        "query": "development context progress tasks",
+        "agent_id": agent_id,
+        "user_id": user_id,
+        "limit": limit,
+    }
+    try:
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json", "X-API-Key": api_key},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read().decode())
+        return body.get("data", {}).get("results", [])
+    except Exception:
+        return []
+
+
+def powermem_add(base_url, api_key, agent_id, user_id, content, metadata):
+    """
+    POST /api/v1/memories.
+    Returns True on success, False on any error.
+    """
+    url = base_url.rstrip("/") + "/api/v1/memories"
+    payload = {
+        "content": content,
+        "agent_id": agent_id,
+        "user_id": user_id,
+        "infer": False,
+        "metadata": metadata,
+    }
+    try:
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json", "X-API-Key": api_key},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10):
+            pass
+        return True
+    except Exception:
+        return False
