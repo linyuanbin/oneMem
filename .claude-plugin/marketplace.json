@@ -1,6 +1,6 @@
 {
-  "name": "onemem",
-  "owner": { "name": "oneMem" },
+  "name": "agent",
+  "owner": { "name": "linyuanbin" },
   "plugins": [
     {
       "name": "onemem",
