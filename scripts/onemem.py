@@ -199,9 +199,9 @@ def cmd_load(stdin_data):
     date_str = saved_at[:10] if saved_at else "unknown date"
 
     output = {
-        "systemMessage": f"🧠 oneMem: memory loaded from {date_str}",
+        "systemMessage": f"oneMem: memory loaded from {date_str}",
         "hookSpecificOutput": {
-            "hook_event_name": "SessionStart",
+            "hookEventName": "SessionStart",
             "additionalContext": f"## Previous Session Memory\n\n{content}",
         },
     }
