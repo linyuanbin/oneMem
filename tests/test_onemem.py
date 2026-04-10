@@ -432,7 +432,8 @@ class TestCmdLoad(unittest.TestCase):
 
     def test_outputs_additional_context_when_memory_found(self):
         stdin_data = {"cwd": "/tmp/myproject", "session_id": "s1", "transcript_path": "/tmp/t.jsonl"}
-        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem"}
+        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem",
+                       "user": "", "user_id": ""}
         fake_results = [{"content": "last session: working on auth module", "memory_id": "m1"}]
 
         with patch.object(onemem, "load_config", return_value=fake_config), \
@@ -455,7 +456,8 @@ class TestCmdLoad(unittest.TestCase):
 
     def test_outputs_empty_json_when_no_memory_found(self):
         stdin_data = {"cwd": "/tmp/myproject", "session_id": "s1", "transcript_path": "/tmp/t.jsonl"}
-        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem"}
+        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem",
+                       "user": "", "user_id": ""}
 
         with patch.object(onemem, "load_config", return_value=fake_config), \
              patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
@@ -463,6 +465,45 @@ class TestCmdLoad(unittest.TestCase):
             output = onemem.cmd_load(stdin_data)
 
         self.assertEqual(json.loads(output), {})
+
+    def test_passes_config_user_id_to_search(self):
+        stdin_data = {"cwd": "/tmp/proj", "session_id": "s1", "transcript_path": "/tmp/t.jsonl"}
+        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem",
+                       "user": "carol", "user_id": "cfg-uuid-999"}
+        fake_results = [{"content": "ctx", "memory_id": "m1"}]
+        search_calls = []
+
+        def fake_search(base_url, api_key, agent_id, user_id, run_id, user="", limit=1):
+            search_calls.append({"user_id": user_id, "run_id": run_id, "user": user})
+            return fake_results
+
+        with patch.object(onemem, "load_config", return_value=fake_config), \
+             patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
+             patch.object(onemem, "powermem_search", side_effect=fake_search):
+            onemem.cmd_load(stdin_data)
+
+        self.assertEqual(search_calls[0]["user_id"], "cfg-uuid-999")
+        self.assertEqual(search_calls[0]["run_id"], "github.com/user/repo")
+        self.assertEqual(search_calls[0]["user"], "carol")
+
+    def test_uses_uuid_fallback_when_user_id_not_in_config(self):
+        stdin_data = {"cwd": "/tmp/proj", "session_id": "s1", "transcript_path": "/tmp/t.jsonl"}
+        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem",
+                       "user": "", "user_id": ""}
+        search_calls = []
+
+        def fake_search(base_url, api_key, agent_id, user_id, run_id, user="", limit=1):
+            search_calls.append({"user_id": user_id})
+            return []
+
+        with patch.object(onemem, "load_config", return_value=fake_config), \
+             patch.object(onemem, "get_project_id", return_value="myrepo"), \
+             patch.object(onemem, "powermem_search", side_effect=fake_search):
+            onemem.cmd_load(stdin_data)
+
+        uid = search_calls[0]["user_id"]
+        import re
+        self.assertRegex(uid, r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 
 
 class TestCmdSave(unittest.TestCase):
@@ -473,7 +514,8 @@ class TestCmdSave(unittest.TestCase):
             "session_id": "s42",
             "transcript_path": "/tmp/t.jsonl",
         }
-        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem"}
+        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem",
+                       "user": "", "user_id": ""}
         fake_context = "I implemented the login feature and wrote tests"
 
         add_calls = []
@@ -503,7 +545,8 @@ class TestCmdSave(unittest.TestCase):
 
     def test_does_nothing_when_transcript_empty(self):
         stdin_data = {"cwd": "/tmp/myproject", "session_id": "s1", "transcript_path": "/tmp/t.jsonl"}
-        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem"}
+        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem",
+                       "user": "", "user_id": ""}
 
         with patch.object(onemem, "load_config", return_value=fake_config), \
              patch.object(onemem, "get_project_id", return_value="proj"), \
@@ -512,6 +555,47 @@ class TestCmdSave(unittest.TestCase):
             onemem.cmd_save(stdin_data)
 
         mock_add.assert_not_called()
+
+    def test_passes_config_user_id_and_run_id_to_add(self):
+        stdin_data = {"cwd": "/tmp/proj", "session_id": "s42", "transcript_path": "/tmp/t.jsonl"}
+        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem",
+                       "user": "dave", "user_id": "cfg-uuid-dave"}
+        fake_context = "some work done"
+        add_calls = []
+
+        def fake_add(base_url, api_key, agent_id, user_id, run_id, content, metadata, user=""):
+            add_calls.append({"user_id": user_id, "run_id": run_id, "user": user})
+            return True
+
+        with patch.object(onemem, "load_config", return_value=fake_config), \
+             patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
+             patch.object(onemem, "extract_context_from_transcript", return_value=fake_context), \
+             patch.object(onemem, "powermem_add", side_effect=fake_add):
+            onemem.cmd_save(stdin_data)
+
+        self.assertEqual(add_calls[0]["user_id"], "cfg-uuid-dave")
+        self.assertEqual(add_calls[0]["run_id"], "github.com/user/repo")
+        self.assertEqual(add_calls[0]["user"], "dave")
+
+    def test_uses_uuid_fallback_when_user_id_not_in_config_save(self):
+        stdin_data = {"cwd": "/tmp/proj", "session_id": "s1", "transcript_path": "/tmp/t.jsonl"}
+        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem",
+                       "user": "", "user_id": ""}
+        add_calls = []
+
+        def fake_add(base_url, api_key, agent_id, user_id, run_id, content, metadata, user=""):
+            add_calls.append({"user_id": user_id})
+            return True
+
+        with patch.object(onemem, "load_config", return_value=fake_config), \
+             patch.object(onemem, "get_project_id", return_value="myrepo"), \
+             patch.object(onemem, "extract_context_from_transcript", return_value="ctx"), \
+             patch.object(onemem, "powermem_add", side_effect=fake_add):
+            onemem.cmd_save(stdin_data)
+
+        uid = add_calls[0]["user_id"]
+        import re
+        self.assertRegex(uid, r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 
 
 if __name__ == "__main__":

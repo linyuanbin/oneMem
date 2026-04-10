@@ -20,6 +20,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -192,11 +193,12 @@ def cmd_load(stdin_data):
 
     cwd = stdin_data.get("cwd", os.getcwd())
     run_id = get_project_id(cwd)
-    user_id = cfg.get("user_id") or run_id
+    user_id = cfg["user_id"] or str(uuid.uuid4())
+    user = cfg["user"]
 
     results = powermem_search(
         cfg["powermem_url"], cfg["api_key"], cfg["agent_id"],
-        user_id=user_id, run_id=run_id, user=cfg.get("user", ""),
+        user_id=user_id, run_id=run_id, user=user,
     )
     if not results:
         return json.dumps({})
@@ -230,7 +232,8 @@ def cmd_save(stdin_data):
 
     cwd = stdin_data.get("cwd", os.getcwd())
     run_id = get_project_id(cwd)
-    user_id = cfg.get("user_id") or run_id
+    user_id = cfg["user_id"] or str(uuid.uuid4())
+    user = cfg["user"]
     session_id = stdin_data.get("session_id", "")
     transcript_path = stdin_data.get("transcript_path", "")
 
@@ -243,7 +246,11 @@ def cmd_save(stdin_data):
         "cwd": cwd,
         "saved_at": datetime.now(timezone.utc).isoformat(),
     }
-    powermem_add(cfg["powermem_url"], cfg["api_key"], cfg["agent_id"], user_id, run_id, context, metadata, user=cfg.get("user", ""))
+    powermem_add(
+        cfg["powermem_url"], cfg["api_key"], cfg["agent_id"],
+        user_id=user_id, run_id=run_id,
+        content=context, metadata=metadata, user=user,
+    )
 
 
 def main():
