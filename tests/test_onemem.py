@@ -360,12 +360,12 @@ class TestPowerMemAdd(unittest.TestCase):
 
     def test_returns_true_on_success(self):
         with patch("urllib.request.urlopen", return_value=self._make_response(200)):
-            result = onemem.powermem_add("http://localhost:8080", "key", "onemem", "user/repo", "content", {})
+            result = onemem.powermem_add("http://localhost:8080", "key", "onemem", user_id="user/repo", run_id="user/repo", content="content", metadata={})
         self.assertTrue(result)
 
     def test_returns_false_on_http_error(self):
         with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("timeout")):
-            result = onemem.powermem_add("http://localhost:8080", "key", "onemem", "user/repo", "content", {})
+            result = onemem.powermem_add("http://localhost:8080", "key", "onemem", user_id="user/repo", run_id="user/repo", content="content", metadata={})
         self.assertFalse(result)
 
     def test_sends_correct_request_body(self):
@@ -377,15 +377,55 @@ class TestPowerMemAdd(unittest.TestCase):
 
         with patch("urllib.request.urlopen", side_effect=fake_urlopen):
             onemem.powermem_add(
-                "http://localhost:8080", "key", "onemem", "user/repo",
-                "my context", {"session_id": "s1"}
+                "http://localhost:8080", "key", "onemem",
+                user_id="user/repo", run_id="user/repo",
+                content="my context", metadata={"session_id": "s1"},
             )
 
         self.assertEqual(captured["data"]["content"], "my context")
         self.assertEqual(captured["data"]["agent_id"], "onemem")
         self.assertEqual(captured["data"]["user_id"], "user/repo")
+        self.assertEqual(captured["data"]["run_id"], "user/repo")
         self.assertFalse(captured["data"]["infer"])
         self.assertEqual(captured["data"]["metadata"]["session_id"], "s1")
+
+    def test_sends_run_id_and_user_header(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["data"] = json.loads(req.data.decode())
+            captured["headers"] = dict(req.headers)
+            return self._make_response()
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            onemem.powermem_add(
+                "http://localhost:8080", "key", "onemem",
+                user_id="config-uuid", run_id="user/repo",
+                content="my context", metadata={"session_id": "s1"},
+                user="bob",
+            )
+
+        self.assertEqual(captured["data"]["user_id"], "config-uuid")
+        self.assertEqual(captured["data"]["run_id"], "user/repo")
+        # urllib normalises header keys via .capitalize() → "Powermem-user-id"
+        self.assertEqual(captured["headers"].get("Powermem-user-id"), "bob")
+
+    def test_omits_powermem_user_id_header_when_user_empty_in_add(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["headers"] = dict(req.headers)
+            return self._make_response()
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            onemem.powermem_add(
+                "http://localhost:8080", "key", "onemem",
+                user_id="config-uuid", run_id="user/repo",
+                content="ctx", metadata={},
+                user="",
+            )
+
+        self.assertNotIn("Powermem-user-id", captured["headers"])
 
 
 class TestCmdLoad(unittest.TestCase):
@@ -438,7 +478,7 @@ class TestCmdSave(unittest.TestCase):
 
         add_calls = []
 
-        def fake_add(base_url, api_key, agent_id, user_id, content, metadata):
+        def fake_add(base_url, api_key, agent_id, user_id, run_id, content, metadata, user=""):
             add_calls.append({"content": content, "metadata": metadata})
             return True
 

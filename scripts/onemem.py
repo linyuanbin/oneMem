@@ -150,9 +150,12 @@ def powermem_search(base_url, api_key, agent_id, user_id, run_id, user="", limit
         return []
 
 
-def powermem_add(base_url, api_key, agent_id, user_id, content, metadata):
+def powermem_add(base_url, api_key, agent_id, user_id, run_id, content, metadata, user=""):
     """
     POST /api/v1/memories.
+    user_id  — from config (or UUID fallback), sent in request body
+    run_id   — git remote / cwd basename, sent in request body
+    user     — from config, sent as Powermem-User-Id header (omitted if empty)
     Returns True on success, False on any error.
     """
     url = base_url.rstrip("/") + "/api/v1/memories"
@@ -160,17 +163,16 @@ def powermem_add(base_url, api_key, agent_id, user_id, content, metadata):
         "content": content,
         "agent_id": agent_id,
         "user_id": user_id,
+        "run_id": run_id,
         "infer": False,
         "metadata": metadata,
     }
+    headers = {"Content-Type": "application/json", "X-API-Key": api_key}
+    if user:
+        headers["Powermem-User-Id"] = user
     try:
         data = json.dumps(payload).encode()
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json", "X-API-Key": api_key},
-            method="POST",
-        )
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
         with urllib.request.urlopen(req, timeout=10):
             pass
         return True
@@ -227,7 +229,8 @@ def cmd_save(stdin_data):
         return
 
     cwd = stdin_data.get("cwd", os.getcwd())
-    user_id = get_project_id(cwd)
+    run_id = get_project_id(cwd)
+    user_id = cfg.get("user_id") or run_id
     session_id = stdin_data.get("session_id", "")
     transcript_path = stdin_data.get("transcript_path", "")
 
@@ -240,7 +243,7 @@ def cmd_save(stdin_data):
         "cwd": cwd,
         "saved_at": datetime.now(timezone.utc).isoformat(),
     }
-    powermem_add(cfg["powermem_url"], cfg["api_key"], cfg["agent_id"], user_id, context, metadata)
+    powermem_add(cfg["powermem_url"], cfg["api_key"], cfg["agent_id"], user_id, run_id, context, metadata, user=cfg.get("user", ""))
 
 
 def main():
