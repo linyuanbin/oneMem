@@ -10,8 +10,13 @@ Config: ~/.oneMem/settings.json  (override with ONEMEM_CONFIG env var)
   {
     "powermem_url": "https://...",  # required
     "api_key": "...",               # optional (leave empty if no auth required)
-    "agent_id": "onemem"            # optional, default "onemem"
+    "agent_id": "onemem",          # optional, default "onemem"
+    "user": "...",                  # optional; sent as Powermem-User-Id header
+    "user_id": "..."                # optional; sent as user_id in request body
+                                    # (random UUID per session if absent)
   }
+
+  The git remote origin URL (or cwd basename) is sent as run_id in the body.
 """
 
 import json
