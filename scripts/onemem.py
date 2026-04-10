@@ -47,6 +47,8 @@ def load_config(path=None):
     cfg.setdefault("api_key", "")
 
     cfg.setdefault("agent_id", "onemem")
+    cfg.setdefault("user", "")
+    cfg.setdefault("user_id", "")
     return cfg
 
 

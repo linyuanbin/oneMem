@@ -89,6 +89,50 @@ class TestLoadConfig(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_user_field_is_returned_when_present(self):
+        cfg = {"powermem_url": "http://localhost:8080", "user": "alice"}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(cfg, f)
+            path = f.name
+        try:
+            result = onemem.load_config(path)
+            self.assertEqual(result["user"], "alice")
+        finally:
+            os.unlink(path)
+
+    def test_user_field_defaults_to_empty_string_when_missing(self):
+        cfg = {"powermem_url": "http://localhost:8080"}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(cfg, f)
+            path = f.name
+        try:
+            result = onemem.load_config(path)
+            self.assertEqual(result["user"], "")
+        finally:
+            os.unlink(path)
+
+    def test_user_id_field_is_returned_when_present(self):
+        cfg = {"powermem_url": "http://localhost:8080", "user_id": "my-uuid-123"}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(cfg, f)
+            path = f.name
+        try:
+            result = onemem.load_config(path)
+            self.assertEqual(result["user_id"], "my-uuid-123")
+        finally:
+            os.unlink(path)
+
+    def test_user_id_field_defaults_to_empty_string_when_missing(self):
+        cfg = {"powermem_url": "http://localhost:8080"}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(cfg, f)
+            path = f.name
+        try:
+            result = onemem.load_config(path)
+            self.assertEqual(result["user_id"], "")
+        finally:
+            os.unlink(path)
+
 
 class TestGetProjectId(unittest.TestCase):
 
