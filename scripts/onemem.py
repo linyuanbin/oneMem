@@ -11,8 +11,7 @@ Config: ~/.oneMem/settings.json  (override with ONEMEM_CONFIG env var)
     "powermem_url": "https://...",  # required
     "api_key": "...",               # optional (leave empty if no auth required)
     "agent_id": "onemem",          # optional, default "onemem"
-    "user": "...",                  # optional; sent as Powermem-User-Id header
-    "user_id": "..."                # optional; sent as user_id in request body
+    "user": "..."                  # optional; sent as Powermem-User-Id header
                                     # (random UUID per session if absent)
   }
 
@@ -28,7 +27,6 @@ import urllib.request
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-
 
 CONFIG_PATH = Path.home() / ".oneMem" / "settings.json"
 
@@ -198,8 +196,8 @@ def cmd_load(stdin_data):
 
     cwd = stdin_data.get("cwd", os.getcwd())
     run_id = get_project_id(cwd)
-    user_id = cfg["user_id"] or str(uuid.uuid4())
-    user = cfg["user"]
+    user_id = cfg.get("user_id") or cfg.get("user") or str(uuid.uuid4())
+    user = cfg.get("user", "")
 
     results = powermem_search(
         cfg["powermem_url"], cfg["api_key"], cfg["agent_id"],
@@ -237,8 +235,8 @@ def cmd_save(stdin_data):
 
     cwd = stdin_data.get("cwd", os.getcwd())
     run_id = get_project_id(cwd)
-    user_id = cfg["user_id"] or str(uuid.uuid4())
-    user = cfg["user"]
+    user_id = cfg.get("user_id") or cfg.get("user") or str(uuid.uuid4())
+    user = cfg.get("user", "")
     session_id = stdin_data.get("session_id", "")
     transcript_path = stdin_data.get("transcript_path", "")
 
@@ -249,6 +247,7 @@ def cmd_save(stdin_data):
     metadata = {
         "session_id": session_id,
         "cwd": cwd,
+        "run_id": run_id,
         "saved_at": datetime.now(timezone.utc).isoformat(),
     }
     powermem_add(
@@ -263,10 +262,14 @@ def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ("load", "save"):
         sys.exit(1)
 
-    try:
-        stdin_data = json.loads(sys.stdin.read())
-    except (json.JSONDecodeError, IOError):
+    # If stdin is a tty (no pipe input), use empty dict to avoid blocking
+    if sys.stdin.isatty():
         stdin_data = {}
+    else:
+        try:
+            stdin_data = json.loads(sys.stdin.read())
+        except (json.JSONDecodeError, IOError):
+            stdin_data = {}
 
     try:
         if sys.argv[1] == "load":
