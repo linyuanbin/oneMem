@@ -324,6 +324,8 @@ class TestPowerMemSearch(unittest.TestCase):
         self.assertEqual(captured["data"]["run_id"], "git@github.com:user/repo")
         self.assertEqual(captured["data"]["agent_id"], "myagent")
         self.assertEqual(captured["data"]["limit"], 1)
+        self.assertEqual(captured["data"]["query"], "development context progress tasks")
+        # urllib normalises header keys via .capitalize() → "Powermem-user-id"
         self.assertEqual(captured["headers"].get("Powermem-user-id"), "alice")
         self.assertIn("X-api-key", captured["headers"])
         self.assertEqual(captured["headers"]["X-api-key"], "mykey")
