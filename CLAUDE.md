@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**oneMem** is a Claude Code plugin for persistent cross-session development memory via PowerMem (oceanbase/powermem). It hooks into `SessionStart` and `Stop` lifecycle events to automatically load and save context.
+**oneMem** provides persistent cross-session development memory via PowerMem (oceanbase/powermem). **Claude Code:** plugin with `SessionStart` / `Stop` hooks (`hooks/hooks.json`). **Cursor:** project `.cursor/hooks.json` with `sessionStart` / `sessionEnd` calling the same `scripts/onemem.py load|save`.
 
 ## Project Structure
 
 ```
 .claude-plugin/     Plugin manifest (plugin.json, marketplace.json)
-hooks/              hooks.json — registers SessionStart + Stop handlers
+hooks/              Claude Code hooks (SessionStart + Stop)
 scripts/onemem.py   Single Python script: all hook logic
 tests/              Unit tests (Python unittest / pytest)
 ```
@@ -38,5 +38,5 @@ echo '{"cwd":"/tmp","session_id":"s1","transcript_path":"/tmp/t.jsonl"}' | pytho
 
 - `user_id` for PowerMem = `git remote get-url origin`, fallback to `basename(cwd)`
 - Config at `~/.oneMem/settings.json` (not in repo — survives plugin reinstalls)
-- All errors exit 0 — hooks must never block the Claude Code workflow
+- All errors exit 0 — hooks must never block the editor/agent workflow
 - Python stdlib only — no dependencies to install

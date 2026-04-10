@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-onemem.py — Claude Code hook handler for cross-session memory via PowerMem.
+onemem.py — Hook handler for cross-session memory via PowerMem (Claude Code + Cursor).
 
 Subcommands:
-  load   SessionStart hook: fetch last memory from PowerMem, inject as context
-  save   Stop hook: extract transcript context, persist to PowerMem
+  load   Session start: fetch last memory from PowerMem, inject as context
+  save   Session end: extract transcript context, persist to PowerMem
+
+Claude Code: hook events SessionStart / Stop; stdout for load uses hookSpecificOutput.
+Cursor: hook events sessionStart / sessionEnd; stdout for load uses additional_context.
 
 Config: ~/.oneMem/settings.json  (override with ONEMEM_CONFIG env var)
   {
@@ -25,6 +28,28 @@ from pathlib import Path
 
 
 CONFIG_PATH = Path.home() / ".oneMem" / "settings.json"
+
+
+def normalize_hook_stdin(stdin_data):
+    """
+    Normalize stdin JSON from different hosts. Cursor supplies workspace_roots and
+    conversation_id in base fields; Claude Code uses cwd and session_id directly.
+    """
+    if not isinstance(stdin_data, dict):
+        return {}
+    out = dict(stdin_data)
+    if not out.get("cwd"):
+        roots = out.get("workspace_roots") or []
+        if roots:
+            out["cwd"] = roots[0]
+    if not out.get("session_id") and out.get("conversation_id"):
+        out["session_id"] = out["conversation_id"]
+    return out
+
+
+def is_cursor_hook(stdin_data):
+    """True when stdin includes Cursor base fields (cursor_version is always set)."""
+    return bool(stdin_data.get("cursor_version"))
 
 
 def load_config(path=None):
@@ -197,12 +222,16 @@ def cmd_load(stdin_data):
 
     saved_at = results[0].get("metadata", {}).get("saved_at", "")
     date_str = saved_at[:10] if saved_at else "unknown date"
+    context_block = f"## Previous Session Memory ({date_str})\n\n{content}"
+
+    if is_cursor_hook(stdin_data):
+        return json.dumps({"additional_context": context_block})
 
     output = {
         "systemMessage": f"oneMem: memory loaded from {date_str}",
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
-            "additionalContext": f"## Previous Session Memory\n\n{content}",
+            "additionalContext": context_block,
         },
     }
     return json.dumps(output)
@@ -244,6 +273,8 @@ def main():
         stdin_data = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, IOError):
         stdin_data = {}
+
+    stdin_data = normalize_hook_stdin(stdin_data)
 
     try:
         if sys.argv[1] == "load":

@@ -319,6 +319,29 @@ class TestPowerMemAdd(unittest.TestCase):
         self.assertEqual(captured["data"]["metadata"]["session_id"], "s1")
 
 
+class TestNormalizeHookStdin(unittest.TestCase):
+
+    def test_cursor_workspace_roots_become_cwd(self):
+        data = onemem.normalize_hook_stdin(
+            {"cursor_version": "1.0", "workspace_roots": ["/proj"], "conversation_id": "c1"}
+        )
+        self.assertEqual(data["cwd"], "/proj")
+        self.assertEqual(data["session_id"], "c1")
+
+    def test_preserves_explicit_cwd_and_session_id(self):
+        data = onemem.normalize_hook_stdin(
+            {
+                "cursor_version": "1.0",
+                "cwd": "/explicit",
+                "session_id": "s9",
+                "workspace_roots": ["/proj"],
+                "conversation_id": "c1",
+            }
+        )
+        self.assertEqual(data["cwd"], "/explicit")
+        self.assertEqual(data["session_id"], "s9")
+
+
 class TestCmdLoad(unittest.TestCase):
 
     def test_outputs_additional_context_when_memory_found(self):
@@ -335,6 +358,26 @@ class TestCmdLoad(unittest.TestCase):
         self.assertIn("hookSpecificOutput", parsed)
         self.assertIn("additionalContext", parsed["hookSpecificOutput"])
         self.assertIn("last session: working on auth module", parsed["hookSpecificOutput"]["additionalContext"])
+
+    def test_cursor_outputs_additional_context_top_level(self):
+        stdin_data = {
+            "cursor_version": "2.0.1",
+            "workspace_roots": ["/tmp/myproject"],
+            "session_id": "s1",
+            "transcript_path": "/tmp/t.jsonl",
+        }
+        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem"}
+        fake_results = [{"content": "cursor memory body", "memory_id": "m1"}]
+
+        with patch.object(onemem, "load_config", return_value=fake_config), \
+             patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
+             patch.object(onemem, "powermem_search", return_value=fake_results):
+            output = onemem.cmd_load(stdin_data)
+
+        parsed = json.loads(output)
+        self.assertNotIn("hookSpecificOutput", parsed)
+        self.assertIn("additional_context", parsed)
+        self.assertIn("cursor memory body", parsed["additional_context"])
 
     def test_outputs_empty_json_when_config_missing(self):
         stdin_data = {"cwd": "/tmp/myproject", "session_id": "s1", "transcript_path": "/tmp/t.jsonl"}
@@ -357,6 +400,32 @@ class TestCmdLoad(unittest.TestCase):
 
 
 class TestCmdSave(unittest.TestCase):
+
+    def test_uses_workspace_roots_when_cwd_missing(self):
+        stdin_data = {
+            "cursor_version": "1.7",
+            "workspace_roots": ["/tmp/myproject"],
+            "conversation_id": "s42",
+            "transcript_path": "/tmp/t.jsonl",
+        }
+        stdin_data = onemem.normalize_hook_stdin(stdin_data)
+        fake_config = {"powermem_url": "http://pm", "api_key": "k", "agent_id": "onemem"}
+        fake_context = "from transcript"
+
+        add_calls = []
+
+        def fake_add(base_url, api_key, agent_id, user_id, content, metadata):
+            add_calls.append({"user_id": user_id, "content": content, "metadata": metadata})
+            return True
+
+        with patch.object(onemem, "load_config", return_value=fake_config), \
+             patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
+             patch.object(onemem, "extract_context_from_transcript", return_value=fake_context), \
+             patch.object(onemem, "powermem_add", side_effect=fake_add):
+            onemem.cmd_save(stdin_data)
+
+        self.assertEqual(len(add_calls), 1)
+        self.assertEqual(add_calls[0]["metadata"]["session_id"], "s42")
 
     def test_calls_powermem_add_with_extracted_context(self):
         stdin_data = {
