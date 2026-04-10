@@ -121,9 +121,12 @@ def extract_context_from_transcript(transcript_path, max_messages=10, max_chars=
     return combined[:max_chars]
 
 
-def powermem_search(base_url, api_key, agent_id, user_id, limit=1):
+def powermem_search(base_url, api_key, agent_id, user_id, run_id, user="", limit=1):
     """
     POST /api/v1/memories/search.
+    user_id  — from config (or UUID fallback), sent in request body
+    run_id   — git remote / cwd basename, sent in request body
+    user     — from config, sent as Powermem-User-Id header (omitted if empty)
     Returns list of result dicts from data.results, or [] on any error.
     """
     url = base_url.rstrip("/") + "/api/v1/memories/search"
@@ -131,16 +134,15 @@ def powermem_search(base_url, api_key, agent_id, user_id, limit=1):
         "query": "development context progress tasks",
         "agent_id": agent_id,
         "user_id": user_id,
+        "run_id": run_id,
         "limit": limit,
     }
+    headers = {"Content-Type": "application/json", "X-API-Key": api_key}
+    if user:
+        headers["Powermem-User-Id"] = user
     try:
         data = json.dumps(payload).encode()
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json", "X-API-Key": api_key},
-            method="POST",
-        )
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
         with urllib.request.urlopen(req, timeout=10) as resp:
             body = json.loads(resp.read().decode())
         return body.get("data", {}).get("results", [])
@@ -187,9 +189,13 @@ def cmd_load(stdin_data):
         return json.dumps({})
 
     cwd = stdin_data.get("cwd", os.getcwd())
-    user_id = get_project_id(cwd)
+    run_id = get_project_id(cwd)
+    user_id = cfg.get("user_id") or run_id
 
-    results = powermem_search(cfg["powermem_url"], cfg["api_key"], cfg["agent_id"], user_id)
+    results = powermem_search(
+        cfg["powermem_url"], cfg["api_key"], cfg["agent_id"],
+        user_id=user_id, run_id=run_id, user=cfg.get("user", ""),
+    )
     if not results:
         return json.dumps({})
 

@@ -289,22 +289,22 @@ class TestPowerMemSearch(unittest.TestCase):
             }
         }
         with patch("urllib.request.urlopen", return_value=self._make_response(response_body)):
-            results = onemem.powermem_search("http://localhost:8080", "key", "onemem", "user/repo")
+            results = onemem.powermem_search("http://localhost:8080", "key", "onemem", user_id="user/repo", run_id="user/repo")
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["content"], "previous work context")
 
     def test_returns_empty_list_when_no_results(self):
         response_body = {"data": {"results": []}}
         with patch("urllib.request.urlopen", return_value=self._make_response(response_body)):
-            results = onemem.powermem_search("http://localhost:8080", "key", "onemem", "user/repo")
+            results = onemem.powermem_search("http://localhost:8080", "key", "onemem", user_id="user/repo", run_id="user/repo")
         self.assertEqual(results, [])
 
     def test_returns_empty_list_on_http_error(self):
         with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("connection refused")):
-            results = onemem.powermem_search("http://localhost:8080", "key", "onemem", "user/repo")
+            results = onemem.powermem_search("http://localhost:8080", "key", "onemem", user_id="user/repo", run_id="user/repo")
         self.assertEqual(results, [])
 
-    def test_sends_correct_request_body(self):
+    def test_sends_run_id_in_body(self):
         response_body = {"data": {"results": []}}
         captured = {}
 
@@ -314,13 +314,36 @@ class TestPowerMemSearch(unittest.TestCase):
             return self._make_response(response_body)
 
         with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            onemem.powermem_search("http://localhost:8080", "mykey", "myagent", "git@github.com:user/repo")
+            onemem.powermem_search(
+                "http://localhost:8080", "mykey", "myagent",
+                user_id="config-uuid", run_id="git@github.com:user/repo",
+                user="alice",
+            )
 
+        self.assertEqual(captured["data"]["user_id"], "config-uuid")
+        self.assertEqual(captured["data"]["run_id"], "git@github.com:user/repo")
         self.assertEqual(captured["data"]["agent_id"], "myagent")
-        self.assertEqual(captured["data"]["user_id"], "git@github.com:user/repo")
         self.assertEqual(captured["data"]["limit"], 1)
+        self.assertEqual(captured["headers"].get("Powermem-user-id"), "alice")
         self.assertIn("X-api-key", captured["headers"])
         self.assertEqual(captured["headers"]["X-api-key"], "mykey")
+
+    def test_omits_powermem_user_id_header_when_user_empty(self):
+        response_body = {"data": {"results": []}}
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["headers"] = dict(req.headers)
+            return self._make_response(response_body)
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            onemem.powermem_search(
+                "http://localhost:8080", "mykey", "myagent",
+                user_id="config-uuid", run_id="myrepo",
+                user="",
+            )
+
+        self.assertNotIn("Powermem-user-id", captured["headers"])
 
 
 class TestPowerMemAdd(unittest.TestCase):
