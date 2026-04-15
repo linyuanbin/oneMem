@@ -134,6 +134,43 @@ class TestLoadConfig(unittest.TestCase):
             os.unlink(path)
 
 
+class TestGetCwd(unittest.TestCase):
+
+    def test_returns_cwd_for_claude_code_format(self):
+        stdin_data = {"cwd": "/tmp/myproject", "session_id": "s1"}
+        result = onemem.get_cwd(stdin_data)
+        self.assertEqual(result, "/tmp/myproject")
+
+    def test_returns_first_workspace_root_for_cursor_format(self):
+        stdin_data = {
+            "workspace_roots": ["/opt/log-agent"],
+            "conversation_id": "abc-123",
+            "hook_event_name": "sessionStart",
+        }
+        result = onemem.get_cwd(stdin_data)
+        self.assertEqual(result, "/opt/log-agent")
+
+    def test_falls_back_to_os_getcwd_when_no_cwd_or_workspace(self):
+        stdin_data = {"session_id": "s1"}
+        with patch.object(os, "getcwd", return_value="/fallback/path"):
+            result = onemem.get_cwd(stdin_data)
+        self.assertEqual(result, "/fallback/path")
+
+    def test_handles_empty_workspace_roots(self):
+        stdin_data = {"workspace_roots": [], "conversation_id": "abc"}
+        with patch.object(os, "getcwd", return_value="/fallback"):
+            result = onemem.get_cwd(stdin_data)
+        self.assertEqual(result, "/fallback")
+
+    def test_prefers_cwd_over_workspace_roots(self):
+        stdin_data = {
+            "cwd": "/claude/cwd",
+            "workspace_roots": ["/cursor/workspace"],
+        }
+        result = onemem.get_cwd(stdin_data)
+        self.assertEqual(result, "/claude/cwd")
+
+
 class TestGetProjectId(unittest.TestCase):
 
     def test_returns_git_remote_url(self):
@@ -265,6 +302,51 @@ class TestExtractContextFromTranscript(unittest.TestCase):
             self.assertIn("cc format answer", result)
             self.assertIn("mixed content answer", result)
             self.assertNotIn("question", result)
+        finally:
+            os.unlink(path)
+
+    def test_extracts_from_cursor_transcript_format(self):
+        """Cursor transcript format: role=user/assistant, content in message.content with <user_query> tags."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            path = f.name
+        try:
+            lines = [
+                {"role": "user", "message": {"content": [{"type": "text", "text": "<user_query>\nfirst question\n</user_query>"}]}},
+                {"role": "assistant", "message": {"content": [{"type": "text", "text": "first answer\n\n[REDACTED]"}]}},
+                {"role": "assistant", "message": {"content": [{"type": "text", "text": "[REDACTED]"}]}},
+                {"role": "user", "message": {"content": [{"type": "text", "text": "<user_query>\nlast question\n</user_query>"}]}},
+                {"role": "assistant", "message": {"content": [{"type": "text", "text": "last answer part 1\n\n[REDACTED]"}]}},
+                {"role": "assistant", "message": {"content": [{"type": "text", "text": "last answer part 2"}]}},
+            ]
+            self._write_transcript(lines, path)
+            result = onemem.extract_context_from_transcript(path)
+            # Should extract last user question + subsequent assistant replies
+            self.assertIn("last question", result)
+            self.assertIn("last answer part 1", result)
+            self.assertIn("last answer part 2", result)
+            # Should NOT include first question/answer (only last Q+A)
+            self.assertNotIn("first question", result)
+            self.assertNotIn("first answer", result)
+            # Should NOT include [REDACTED] placeholder
+            self.assertNotIn("[REDACTED]", result)
+            # Should have Q: prefix for question
+            self.assertIn("Q: last question", result)
+        finally:
+            os.unlink(path)
+
+    def test_cursor_format_returns_empty_when_no_user_query(self):
+        """Cursor format without <user_query> tags should fall back to CC format."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            path = f.name
+        try:
+            lines = [
+                {"role": "user", "message": {"content": [{"type": "text", "text": "plain user message"}]}},
+                {"role": "assistant", "message": {"content": [{"type": "text", "text": "assistant reply"}]}},
+            ]
+            self._write_transcript(lines, path)
+            result = onemem.extract_context_from_transcript(path)
+            # Without <user_query> tags, should fall back to CC-style extraction (assistant messages only)
+            self.assertIn("assistant reply", result)
         finally:
             os.unlink(path)
 
@@ -437,8 +519,8 @@ class TestCmdLoad(unittest.TestCase):
         fake_results = [{"content": "last session: working on auth module", "memory_id": "m1"}]
 
         with patch.object(onemem, "load_config", return_value=fake_config), \
-             patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
-             patch.object(onemem, "powermem_search", return_value=fake_results):
+                patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
+                patch.object(onemem, "powermem_search", return_value=fake_results):
             output = onemem.cmd_load(stdin_data)
 
         parsed = json.loads(output)
@@ -460,8 +542,8 @@ class TestCmdLoad(unittest.TestCase):
                        "user": "", "user_id": ""}
 
         with patch.object(onemem, "load_config", return_value=fake_config), \
-             patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
-             patch.object(onemem, "powermem_search", return_value=[]):
+                patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
+                patch.object(onemem, "powermem_search", return_value=[]):
             output = onemem.cmd_load(stdin_data)
 
         self.assertEqual(json.loads(output), {})
@@ -478,8 +560,8 @@ class TestCmdLoad(unittest.TestCase):
             return fake_results
 
         with patch.object(onemem, "load_config", return_value=fake_config), \
-             patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
-             patch.object(onemem, "powermem_search", side_effect=fake_search):
+                patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
+                patch.object(onemem, "powermem_search", side_effect=fake_search):
             onemem.cmd_load(stdin_data)
 
         self.assertEqual(search_calls[0]["user_id"], "cfg-uuid-999")
@@ -497,8 +579,8 @@ class TestCmdLoad(unittest.TestCase):
             return []
 
         with patch.object(onemem, "load_config", return_value=fake_config), \
-             patch.object(onemem, "get_project_id", return_value="myrepo"), \
-             patch.object(onemem, "powermem_search", side_effect=fake_search):
+                patch.object(onemem, "get_project_id", return_value="myrepo"), \
+                patch.object(onemem, "powermem_search", side_effect=fake_search):
             onemem.cmd_load(stdin_data)
 
         uid = search_calls[0]["user_id"]
@@ -525,9 +607,9 @@ class TestCmdSave(unittest.TestCase):
             return True
 
         with patch.object(onemem, "load_config", return_value=fake_config), \
-             patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
-             patch.object(onemem, "extract_context_from_transcript", return_value=fake_context), \
-             patch.object(onemem, "powermem_add", side_effect=fake_add):
+                patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
+                patch.object(onemem, "extract_context_from_transcript", return_value=fake_context), \
+                patch.object(onemem, "powermem_add", side_effect=fake_add):
             onemem.cmd_save(stdin_data)
 
         self.assertEqual(len(add_calls), 1)
@@ -538,7 +620,7 @@ class TestCmdSave(unittest.TestCase):
         stdin_data = {"cwd": "/tmp/myproject", "session_id": "s1", "transcript_path": "/tmp/t.jsonl"}
 
         with patch.object(onemem, "load_config", return_value=None), \
-             patch.object(onemem, "powermem_add") as mock_add:
+                patch.object(onemem, "powermem_add") as mock_add:
             onemem.cmd_save(stdin_data)
 
         mock_add.assert_not_called()
@@ -549,9 +631,9 @@ class TestCmdSave(unittest.TestCase):
                        "user": "", "user_id": ""}
 
         with patch.object(onemem, "load_config", return_value=fake_config), \
-             patch.object(onemem, "get_project_id", return_value="proj"), \
-             patch.object(onemem, "extract_context_from_transcript", return_value=""), \
-             patch.object(onemem, "powermem_add") as mock_add:
+                patch.object(onemem, "get_project_id", return_value="proj"), \
+                patch.object(onemem, "extract_context_from_transcript", return_value=""), \
+                patch.object(onemem, "powermem_add") as mock_add:
             onemem.cmd_save(stdin_data)
 
         mock_add.assert_not_called()
@@ -568,9 +650,9 @@ class TestCmdSave(unittest.TestCase):
             return True
 
         with patch.object(onemem, "load_config", return_value=fake_config), \
-             patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
-             patch.object(onemem, "extract_context_from_transcript", return_value=fake_context), \
-             patch.object(onemem, "powermem_add", side_effect=fake_add):
+                patch.object(onemem, "get_project_id", return_value="github.com/user/repo"), \
+                patch.object(onemem, "extract_context_from_transcript", return_value=fake_context), \
+                patch.object(onemem, "powermem_add", side_effect=fake_add):
             onemem.cmd_save(stdin_data)
 
         self.assertEqual(add_calls[0]["user_id"], "cfg-uuid-dave")
@@ -588,9 +670,9 @@ class TestCmdSave(unittest.TestCase):
             return True
 
         with patch.object(onemem, "load_config", return_value=fake_config), \
-             patch.object(onemem, "get_project_id", return_value="myrepo"), \
-             patch.object(onemem, "extract_context_from_transcript", return_value="ctx"), \
-             patch.object(onemem, "powermem_add", side_effect=fake_add):
+                patch.object(onemem, "get_project_id", return_value="myrepo"), \
+                patch.object(onemem, "extract_context_from_transcript", return_value="ctx"), \
+                patch.object(onemem, "powermem_add", side_effect=fake_add):
             onemem.cmd_save(stdin_data)
 
         uid = add_calls[0]["user_id"]

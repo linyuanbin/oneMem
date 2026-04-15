@@ -20,6 +20,7 @@ Config: ~/.oneMem/settings.json  (override with ONEMEM_CONFIG env var)
 
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.error
@@ -77,15 +78,39 @@ def get_project_id(cwd):
     return Path(cwd).name
 
 
+def extract_text_from_content(content):
+    """Extract text from a content array or string."""
+    texts = []
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = block.get("text", "").strip()
+                if text:
+                    texts.append(text)
+    elif isinstance(content, str) and content.strip():
+        texts.append(content.strip())
+    return texts
+
+
+def extract_user_query(text):
+    """Extract question text from <user_query> tags (Cursor format)."""
+    match = re.search(r"<user_query>\s*(.*?)\s*</user_query>", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
+
+
 def extract_context_from_transcript(transcript_path, max_messages=10, max_chars=8000):
     """
-    Read a Claude Code transcript.jsonl and extract the last max_messages
-    assistant text blocks. Returns concatenated text capped at max_chars.
+    Read a transcript.jsonl and extract context for memory storage.
+    Returns concatenated text capped at max_chars.
     Returns empty string on any error.
 
-    Handles two formats:
+    Handles three formats:
+    - Cursor format: entry.role == "user"/"assistant", content in entry.message.content
+      Extracts last user question + subsequent assistant replies
     - Current CC format: entry.type == "assistant", content in entry.message.content
-    - Legacy format: entry.role == "assistant", content in entry.content
+    - Legacy CC format: entry.role == "assistant", content in entry.content
     """
     try:
         with open(transcript_path) as f:
@@ -93,7 +118,7 @@ def extract_context_from_transcript(transcript_path, max_messages=10, max_chars=
     except (FileNotFoundError, OSError):
         return ""
 
-    assistant_texts = []
+    entries = []
     for line in raw_lines:
         line = line.strip()
         if not line:
@@ -102,27 +127,80 @@ def extract_context_from_transcript(transcript_path, max_messages=10, max_chars=
             entry = json.loads(line)
         except json.JSONDecodeError:
             continue
-        # Claude Code transcript format: entry.type == "assistant" with
-        # content nested in entry.message.content.
-        # Also handle legacy format where role is at the top level.
-        if entry.get("type") == "assistant":
-            content = entry.get("message", {}).get("content", [])
-        elif entry.get("role") == "assistant":
-            content = entry.get("content", [])
-        else:
-            continue
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    text = block.get("text", "").strip()
-                    if text:
-                        assistant_texts.append(text)
-        elif isinstance(content, str) and content.strip():
-            assistant_texts.append(content.strip())
+        entries.append(entry)
 
-    last_messages = assistant_texts[-max_messages:]
-    combined = "\n---\n".join(last_messages)
-    return combined[:max_chars]
+    # Detect format: Cursor has role=="user" entries with <user_query> tags
+    has_cursor_format = False
+    for e in entries:
+        if e.get("role") == "user":
+            content = e.get("message", {}).get("content", []) or e.get("content", [])
+            texts = extract_text_from_content(content)
+            for t in texts:
+                if "<user_query>" in t:
+                    has_cursor_format = True
+                    break
+        if has_cursor_format:
+            break
+
+    if has_cursor_format:
+        # Cursor format: extract last user question + all subsequent assistant replies
+        last_user_idx = -1
+        last_user_text = ""
+        for i, entry in enumerate(entries):
+            if entry.get("role") == "user":
+                # Cursor: content in message.content; test format: content at top level
+                content = entry.get("message", {}).get("content", []) or entry.get("content", [])
+                texts = extract_text_from_content(content)
+                for t in texts:
+                    query = extract_user_query(t)
+                    if query:
+                        last_user_idx = i
+                        last_user_text = query
+
+        if last_user_idx < 0:
+            return ""
+
+        # Collect all assistant replies after the last user question
+        assistant_texts = []
+        for entry in entries[last_user_idx + 1:]:
+            if entry.get("role") == "assistant":
+                content = entry.get("message", {}).get("content", [])
+                texts = extract_text_from_content(content)
+                for t in texts:
+                    if not t:
+                        continue
+                    # Skip pure [REDACTED] placeholder blocks
+                    if t.strip() == "[REDACTED]" or t.startswith("[REDACTED]"):
+                        continue
+                    # Strip trailing [REDACTED] from valid content
+                    cleaned = re.sub(r"\n+\[REDACTED\]$", "", t)
+                    if cleaned.strip():
+                        assistant_texts.append(cleaned)
+
+        if not assistant_texts:
+            return ""
+
+        combined = f"Q: {last_user_text}\n---\nA: " + "\n".join(assistant_texts)
+        return combined[:max_chars]
+
+    else:
+        # Claude Code format: extract last max_messages assistant texts
+        assistant_texts = []
+        for entry in entries:
+            # CC format: entry.type == "assistant"
+            if entry.get("type") == "assistant":
+                content = entry.get("message", {}).get("content", [])
+            elif entry.get("role") == "assistant":
+                # Support both message.content and top-level content
+                content = entry.get("message", {}).get("content", []) or entry.get("content", [])
+            else:
+                continue
+            texts = extract_text_from_content(content)
+            assistant_texts.extend(texts)
+
+        last_messages = assistant_texts[-max_messages:]
+        combined = "\n---\n".join(last_messages)
+        return combined[:max_chars]
 
 
 def powermem_search(base_url, api_key, agent_id, user_id, run_id, user="", limit=1):
@@ -184,6 +262,22 @@ def powermem_add(base_url, api_key, agent_id, user_id, run_id, content, metadata
         return False
 
 
+def get_cwd(stdin_data):
+    """
+    Extract working directory from hook input.
+    Supports both Claude Code format (cwd field) and Cursor format (workspace_roots array).
+    """
+    # Claude Code format: direct cwd field
+    if "cwd" in stdin_data:
+        return stdin_data["cwd"]
+    # Cursor format: workspace_roots array (use first workspace)
+    workspace_roots = stdin_data.get("workspace_roots", [])
+    if isinstance(workspace_roots, list) and workspace_roots:
+        return workspace_roots[0]
+    # Fallback to current working directory
+    return os.getcwd()
+
+
 def cmd_load(stdin_data):
     """
     SessionStart hook handler.
@@ -194,7 +288,7 @@ def cmd_load(stdin_data):
     if not cfg:
         return json.dumps({})
 
-    cwd = stdin_data.get("cwd", os.getcwd())
+    cwd = get_cwd(stdin_data)
     run_id = get_project_id(cwd)
     user_id = cfg.get("user_id") or cfg.get("user") or str(uuid.uuid4())
     user = cfg.get("user", "")
@@ -233,11 +327,12 @@ def cmd_save(stdin_data):
     if not cfg:
         return
 
-    cwd = stdin_data.get("cwd", os.getcwd())
+    cwd = get_cwd(stdin_data)
     run_id = get_project_id(cwd)
     user_id = cfg.get("user_id") or cfg.get("user") or str(uuid.uuid4())
     user = cfg.get("user", "")
-    session_id = stdin_data.get("session_id", "")
+    # Claude Code uses session_id, Cursor uses conversation_id
+    session_id = stdin_data.get("session_id") or stdin_data.get("conversation_id", "")
     transcript_path = stdin_data.get("transcript_path", "")
 
     context = extract_context_from_transcript(transcript_path)
