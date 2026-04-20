@@ -1,5 +1,6 @@
 {
   "name": "onemem",
   "version": "0.1.3",
-  "description": "Persistent cross-session memory for Claude Code via PowerMem"
+  "description": "Persistent cross-session memory for Claude Code via PowerMem",
+  "mcpServers": "./mcp/mcp.json"
 }

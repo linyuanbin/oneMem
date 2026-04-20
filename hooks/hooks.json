@@ -1,13 +1,26 @@
 {
+  "description": "onemem - Cross-IDE persistent memory plugin with progressive disclosure",
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "",
+        "matcher": "startup|clear|compact",
         "hooks": [
           {
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/onemem.py load",
             "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/onemem.py observe",
+            "timeout": 10
           }
         ]
       }

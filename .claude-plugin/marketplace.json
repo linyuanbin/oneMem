@@ -27,15 +27,6 @@
       },
       "description": "A complete system: skills, instincts, memory optimization, continuous learning, security scanning, and research-first development",
       "category": "productivity"
-    },
-    {
-      "name": "claude-mem",
-      "source": {
-        "source": "github",
-        "repo": "thedotmack/claude-mem"
-      },
-      "description": "Claude-Mem 通过自动捕获工具使用观察、生成语义摘要并使其可用于未来会话,无缝保留跨会话的上下文。这使 Claude 能够在会话结束或重新连接后仍保持对项目的知识连续性。",
-      "category": "productivity"
     }
   ]
 }
